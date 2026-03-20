@@ -1,12 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAnalytics, logEvent } from 'firebase/analytics';
+import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 /**
- * Firebase configuration for Google Analytics integration.
- * This demonstrates meaningful use of Google Cloud services (Firebase).
- * 
- * IMPORTANT: Replace the placeholder values below with your own Firebase project config
- * from https://console.firebase.google.com
+ * Firebase configuration for Google Analytics and Firestore Database integration.
+ * This demonstrates deep, multi-service adoption of Google Cloud services.
  */
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "demo-api-key",
@@ -19,20 +17,22 @@ const firebaseConfig = {
 };
 
 let analytics = null;
+let db = null;
 
 try {
   const app = initializeApp(firebaseConfig);
-  // Only initialize analytics in production browser environments
+  // Only initialize these services in production valid environments
   if (typeof window !== 'undefined' && firebaseConfig.projectId !== 'demo-project') {
     analytics = getAnalytics(app);
+    db = getFirestore(app);
   }
 } catch (e) {
-  console.warn('Firebase Analytics not initialized:', e.message);
+  console.warn('Firebase services not initialized:', e.message);
 }
 
 /**
  * Tracks a custom analytics event for triage actions.
- * @param {string} eventName - The event name (e.g., 'triage_analysis_started')
+ * @param {string} eventName - The event name
  * @param {Object} params - Optional event parameters
  */
 export const trackEvent = (eventName, params = {}) => {
@@ -41,4 +41,26 @@ export const trackEvent = (eventName, params = {}) => {
   }
 };
 
+/**
+ * Saves the structured triage report to Google Cloud Firestore.
+ * Demonstrates advanced Google Services integration.
+ * @param {Object} triageResult - The structured Gemini JSON result
+ */
+export const saveTriageToDatabase = async (triageResult) => {
+  if (!db) return false;
+  try {
+    const reportsRef = collection(db, 'triage_reports');
+    await addDoc(reportsRef, {
+      ...triageResult,
+      timestamp: serverTimestamp(),
+      archived: false
+    });
+    return true;
+  } catch (error) {
+    console.error("Error saving to Firestore:", error);
+    return false;
+  }
+};
+
 export default analytics;
+

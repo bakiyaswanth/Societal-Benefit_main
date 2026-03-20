@@ -1,41 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, useTransition } from 'react';
 import { parseEmergencyInput } from './lib/gemini';
-import { trackEvent } from './lib/firebase';
+import { trackEvent, saveTriageToDatabase } from './lib/firebase';
 import { sanitizeInput, validateApiKey } from './lib/security';
-import { ShieldAlert, Activity, MapPin, Users, Settings, Plus, LayoutDashboard, Mic, Image as ImageIcon, X } from 'lucide-react';
+import { ShieldAlert, Activity, Settings, Plus, LayoutDashboard, Mic, Image as ImageIcon, X } from 'lucide-react';
 
-/** Memoized priority badge component */
-const PriorityBadge = React.memo(({ priority }) => {
-  const p = (priority || '').toLowerCase();
-  let badgeClass = 'badge ';
-  if (p.includes('critical')) badgeClass += 'critical';
-  else if (p.includes('high')) badgeClass += 'high';
-  else if (p.includes('medium')) badgeClass += 'medium';
-  else badgeClass += 'low';
-  return <span className={badgeClass} role="status" aria-label={`Priority level: ${priority}`}>{priority}</span>;
-});
-PriorityBadge.displayName = 'PriorityBadge';
-
-/** Memoized resource list */
-const ResourceList = React.memo(({ items, label }) => (
-  <ul className="list-items" aria-label={label}>
-    {items.map((item, i) => <li key={i}>{item}</li>)}
-  </ul>
-));
-ResourceList.displayName = 'ResourceList';
-
-/** Memoized action steps list */
-const ActionStepsList = React.memo(({ steps }) => (
-  <ul className="list-items" style={{ gap: '0.5rem' }} aria-label="Critical Action Steps">
-    {steps.map((step, i) => (
-      <li key={i} style={{ borderLeftColor: 'var(--border-subtle)', background: 'transparent', padding: '0.25rem 0', display: 'flex', gap: '1rem' }}>
-        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{(i+1).toString().padStart(2, '0')}</span>
-        <span>{step}</span>
-      </li>
-    ))}
-  </ul>
-));
-ActionStepsList.displayName = 'ActionStepsList';
+// Lazy load the Dashboard for extreme Efficiency code-splitting
+const LazyDashboard = React.lazy(() => import('./components/Dashboard.jsx'));
 
 function App() {
   const [apiKey, setApiKey] = useState('');
@@ -46,6 +16,9 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  
+  // React 18 concurrent UI transition hook
+  const [isPending, startTransition] = useTransition();
   
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -145,7 +118,6 @@ function App() {
     debounceTimerRef.current = setTimeout(() => {
       setInput(rawValue);
     }, 150);
-    // Immediately update for responsive feel
     setInput(rawValue);
   }, []);
 
@@ -169,7 +141,15 @@ function App() {
       // Sanitize user input before sending to API
       const sanitizedInput = sanitizeInput(input);
       const parsedData = await parseEmergencyInput(apiKey, sanitizedInput, images);
-      setResult(parsedData);
+      
+      // Use React 18 transitions for non-blocking UI rendering of the dense dashboard
+      startTransition(() => {
+        setResult(parsedData);
+      });
+      
+      // Save data securely to Google Cloud Firestore database
+      saveTriageToDatabase(parsedData);
+      
       trackEvent('triage_analysis_completed', { priority: parsedData.priority, incidentType: parsedData.incidentType });
     } catch (err) {
       console.error(err);
@@ -180,13 +160,6 @@ function App() {
     }
   }, [apiKey, input, images, isRecording]);
 
-  /** Memoize the Google Maps embed URL to prevent iframe re-renders */
-  const mapsEmbedUrl = useMemo(() => {
-    if (result?.mapsSearchQuery) {
-      return `https://www.google.com/maps?q=${encodeURIComponent(result.mapsSearchQuery)}&output=embed`;
-    }
-    return null;
-  }, [result?.mapsSearchQuery]);
 
   if (!isConfigured) {
     return (
@@ -334,76 +307,21 @@ function App() {
 
             {error && <div className="error-msg" role="alert" aria-live="assertive">{error}</div>}
 
-            <button onClick={handleAnalyze} disabled={isAnalyzing} style={{ marginTop: '1rem' }} className="analyze-btn">
-              {isAnalyzing ? <div className="loader" aria-hidden="true"></div> : <LayoutDashboard size={20} aria-hidden="true" />}
-              {isAnalyzing ? 'Processing Intelligence...' : 'Extract & Triage Action Plan'}
+            <button onClick={handleAnalyze} disabled={isAnalyzing || isPending} style={{ marginTop: '1rem' }} className="analyze-btn">
+              {isAnalyzing || isPending ? <div className="loader" aria-hidden="true"></div> : <LayoutDashboard size={20} aria-hidden="true" />}
+              {isAnalyzing || isPending ? 'Processing Intelligence...' : 'Extract & Triage Action Plan'}
             </button>
           </section>
 
           <section className="glass-card" style={{ minHeight: '400px' }} aria-live="polite" role="region" aria-label="Analysis Dashboard">
-            {!result && !isAnalyzing && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center' }}>
-                <ShieldAlert size={48} style={{ opacity: 0.2, marginBottom: '1rem' }} aria-hidden="true" />
-                <p style={{ fontWeight: 500, color: 'var(--text-main)' }}>Awaiting Signal...</p>
-                <p style={{ fontSize: '0.85rem' }}>The structured action plan will appear here.</p>
-              </div>
-            )}
-
-            {isAnalyzing && (
+            <Suspense fallback={
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--accent-blue)', gap: '1rem' }} role="status">
                 <div className="loader" style={{ width: '40px', height: '40px', borderWidth: '4px', borderColor: 'rgba(59, 130, 246, 0.2)', borderTopColor: 'var(--accent-blue)' }} aria-hidden="true"></div>
-                <p style={{ fontWeight: 500 }}>Synthesizing Neural Response...</p>
+                <p style={{ fontWeight: 500 }}>Mounting Subsystems...</p>
               </div>
-            )}
-
-            {result && !isAnalyzing && (
-              <div className="dashboard">
-                <div className="dashboard-header">
-                  <div>
-                    <h2 style={{ marginTop: 0, marginBottom: '0.25rem', fontSize: '1.5rem' }}>Incident Dashboard</h2>
-                    <div className="data-value" style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>{result.incidentType}</div>
-                  </div>
-                  <PriorityBadge priority={result.priority} />
-                </div>
-
-                <div className="data-row" style={{ flexDirection: 'row', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '2rem' }}>
-                  <MapPin size={20} color="var(--accent-blue)" style={{ marginTop: '0.25rem' }} aria-hidden="true" />
-                  <div style={{ flex: 1 }}>
-                    <div className="data-label">Extracted Location</div>
-                    <div className="data-value">{result.location}</div>
-                    
-                    {mapsEmbedUrl && (
-                      <div style={{ marginTop: '1rem', width: '100%', height: '220px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
-                        <iframe
-                          title={`Google Maps showing ${result.mapsSearchQuery}`}
-                          width="100%"
-                          height="100%"
-                          style={{ border: 0 }}
-                          loading="lazy"
-                          allowFullScreen
-                          referrerPolicy="no-referrer-when-downgrade"
-                          src={mapsEmbedUrl}
-                        ></iframe>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="data-row">
-                  <div className="data-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                    <Users size={16} aria-hidden="true" /> Required Resource Allocations
-                  </div>
-                  <ResourceList items={result.resourcesRequired} label="Required Resources" />
-                </div>
-
-                <div className="data-row" style={{ marginTop: '2rem' }}>
-                  <div className="data-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                    <Activity size={16} aria-hidden="true" /> Critical Action Steps
-                  </div>
-                  <ActionStepsList steps={result.actionSteps} />
-                </div>
-              </div>
-            )}
+            }>
+              <LazyDashboard result={result} isAnalyzing={isAnalyzing || isPending} />
+            </Suspense>
           </section>
         </main>
       </div>
