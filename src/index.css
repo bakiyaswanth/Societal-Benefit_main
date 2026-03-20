@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
   --bg-dark: #0f1115;
   --bg-card: rgba(26, 29, 36, 0.6);
@@ -390,5 +392,15 @@ textarea.recording-active {
 
 .analyze-btn {
   margin-top: auto;
+}
+
+/* Respect user motion preferences (Accessibility) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 

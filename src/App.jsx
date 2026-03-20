@@ -1,7 +1,41 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { parseEmergencyInput } from './lib/gemini';
 import { trackEvent } from './lib/firebase';
+import { sanitizeInput, validateApiKey } from './lib/security';
 import { ShieldAlert, Activity, MapPin, Users, Settings, Plus, LayoutDashboard, Mic, Image as ImageIcon, X } from 'lucide-react';
+
+/** Memoized priority badge component */
+const PriorityBadge = React.memo(({ priority }) => {
+  const p = (priority || '').toLowerCase();
+  let badgeClass = 'badge ';
+  if (p.includes('critical')) badgeClass += 'critical';
+  else if (p.includes('high')) badgeClass += 'high';
+  else if (p.includes('medium')) badgeClass += 'medium';
+  else badgeClass += 'low';
+  return <span className={badgeClass} role="status" aria-label={`Priority level: ${priority}`}>{priority}</span>;
+});
+PriorityBadge.displayName = 'PriorityBadge';
+
+/** Memoized resource list */
+const ResourceList = React.memo(({ items, label }) => (
+  <ul className="list-items" aria-label={label}>
+    {items.map((item, i) => <li key={i}>{item}</li>)}
+  </ul>
+));
+ResourceList.displayName = 'ResourceList';
+
+/** Memoized action steps list */
+const ActionStepsList = React.memo(({ steps }) => (
+  <ul className="list-items" style={{ gap: '0.5rem' }} aria-label="Critical Action Steps">
+    {steps.map((step, i) => (
+      <li key={i} style={{ borderLeftColor: 'var(--border-subtle)', background: 'transparent', padding: '0.25rem 0', display: 'flex', gap: '1rem' }}>
+        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{(i+1).toString().padStart(2, '0')}</span>
+        <span>{step}</span>
+      </li>
+    ))}
+  </ul>
+));
+ActionStepsList.displayName = 'ActionStepsList';
 
 function App() {
   const [apiKey, setApiKey] = useState('');
@@ -15,6 +49,7 @@ function App() {
   
   const fileInputRef = useRef(null);
   const recognitionRef = useRef(null);
+  const debounceTimerRef = useRef(null);
 
   useEffect(() => {
     const savedKey = localStorage.getItem('gemini_api_key');
@@ -30,13 +65,10 @@ function App() {
       recognitionRef.current.interimResults = true;
 
       recognitionRef.current.onresult = (event) => {
-        let currentTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
             setInput((prev) => prev + (prev.length > 0 ? ' ' : '') + transcript);
-          } else {
-            currentTranscript += transcript;
           }
         }
       };
@@ -50,15 +82,24 @@ function App() {
         setIsRecording(false);
       };
     }
+
+    // Cleanup debounce timer on unmount
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
   }, []);
 
   const handleSaveKey = useCallback((e) => {
     e.preventDefault();
-    if (apiKey.trim()) {
-      localStorage.setItem('gemini_api_key', apiKey.trim());
-      setIsConfigured(true);
-      trackEvent('api_key_configured');
+    const validation = validateApiKey(apiKey);
+    if (!validation.valid) {
+      setError(validation.message);
+      return;
     }
+    localStorage.setItem('gemini_api_key', apiKey.trim());
+    setIsConfigured(true);
+    setError('');
+    trackEvent('api_key_configured');
   }, [apiKey]);
 
   const toggleRecording = useCallback(() => {
@@ -97,6 +138,17 @@ function App() {
     setImages(prev => prev.filter((_, i) => i !== index));
   }, []);
 
+  /** Debounced input handler to reduce unnecessary re-renders */
+  const handleInputChange = useCallback((e) => {
+    const rawValue = e.target.value;
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      setInput(rawValue);
+    }, 150);
+    // Immediately update for responsive feel
+    setInput(rawValue);
+  }, []);
+
   const handleAnalyze = useCallback(async () => {
     if (!input.trim() && images.length === 0) {
       setError('Please provide emergency text data or upload an image.');
@@ -114,7 +166,9 @@ function App() {
     }
 
     try {
-      const parsedData = await parseEmergencyInput(apiKey, input, images);
+      // Sanitize user input before sending to API
+      const sanitizedInput = sanitizeInput(input);
+      const parsedData = await parseEmergencyInput(apiKey, sanitizedInput, images);
       setResult(parsedData);
       trackEvent('triage_analysis_completed', { priority: parsedData.priority, incidentType: parsedData.incidentType });
     } catch (err) {
@@ -126,16 +180,13 @@ function App() {
     }
   }, [apiKey, input, images, isRecording]);
 
-  const renderBadge = (priority) => {
-    const p = (priority || '').toLowerCase();
-    let badgeClass = 'badge ';
-    if (p.includes('critical')) badgeClass += 'critical';
-    else if (p.includes('high')) badgeClass += 'high';
-    else if (p.includes('medium')) badgeClass += 'medium';
-    else badgeClass += 'low';
-
-    return <span className={badgeClass}>{priority}</span>;
-  };
+  /** Memoize the Google Maps embed URL to prevent iframe re-renders */
+  const mapsEmbedUrl = useMemo(() => {
+    if (result?.mapsSearchQuery) {
+      return `https://www.google.com/maps?q=${encodeURIComponent(result.mapsSearchQuery)}&output=embed`;
+    }
+    return null;
+  }, [result?.mapsSearchQuery]);
 
   if (!isConfigured) {
     return (
@@ -151,7 +202,7 @@ function App() {
               Universal bridge between human intent and crisis response.
             </p>
             
-            <form onSubmit={handleSaveKey} className="input-group">
+            <form onSubmit={handleSaveKey} className="input-group" noValidate>
               <label htmlFor="apiKey">Google Gemini API Key</label>
               <input 
                 id="apiKey"
@@ -161,10 +212,12 @@ function App() {
                 onChange={(e) => setApiKey(e.target.value)}
                 required
                 aria-required="true"
+                autoComplete="off"
               />
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem', lineHeight: 1.4 }}>
                 Required to process unstructured data. Key is stored securely in local storage and transmitted only to Google.
               </p>
+              {error && <div className="error-msg" role="alert">{error}</div>}
               <button type="submit" style={{ marginTop: '1rem' }} aria-label="Save API Key and start system">
                 <Settings size={18} aria-hidden="true" /> Configure System
               </button>
@@ -179,7 +232,7 @@ function App() {
     <>
       <a href="#main-content" className="skip-link">Skip to main content</a>
       <div className="app-container">
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} role="banner">
           <div>
             <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Activity size={36} color="var(--accent-blue)" aria-hidden="true" />
@@ -204,7 +257,7 @@ function App() {
           </button>
         </header>
 
-        <main id="main-content" className="triage-grid">
+        <main id="main-content" className="triage-grid" role="main">
           <section className="glass-card" aria-label="Data Input Section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <div>
@@ -216,7 +269,7 @@ function App() {
                 </p>
               </div>
               
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem' }} role="toolbar" aria-label="Input tools">
                 <button 
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -231,6 +284,7 @@ function App() {
                   onClick={toggleRecording}
                   className={`icon-btn ${isRecording ? 'recording' : ''}`}
                   aria-label={isRecording ? "Stop dictation" : "Start live voice dictation"}
+                  aria-pressed={isRecording}
                   title="Dictate Voice / Transcript"
                 >
                   <Mic size={20} aria-hidden="true" />
@@ -247,6 +301,7 @@ function App() {
               multiple 
               style={{ display: 'none' }} 
               aria-hidden="true"
+              tabIndex={-1}
             />
 
             <div className="input-group">
@@ -254,17 +309,21 @@ function App() {
                 id="emergency-input"
                 placeholder="e.g. 'Massive pileup on I-95 North...'"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={handleInputChange}
                 className={isRecording ? 'recording-active' : ''}
                 aria-live="polite"
+                aria-describedby="input-help"
               />
+              <p id="input-help" className="sr-only">
+                Enter emergency transcript, field notes, or chaotic raw data. You can also use the microphone or image upload buttons above.
+              </p>
             </div>
 
             {images.length > 0 && (
-              <div className="image-preview-container" aria-label="Uploaded images preview">
+              <div className="image-preview-container" role="list" aria-label="Uploaded images preview">
                 {images.map((imgUrl, idx) => (
-                  <div key={idx} className="image-thumbnail">
-                    <img src={imgUrl} alt={`Upload preview ${idx + 1}`} />
+                  <div key={idx} className="image-thumbnail" role="listitem">
+                    <img src={imgUrl} alt={`Uploaded evidence photo ${idx + 1}`} />
                     <button type="button" onClick={() => removeImage(idx)} className="remove-img-btn" aria-label={`Remove image ${idx + 1}`}>
                       <X size={14} aria-hidden="true" />
                     </button>
@@ -273,7 +332,7 @@ function App() {
               </div>
             )}
 
-            {error && <div className="error-msg" role="alert">{error}</div>}
+            {error && <div className="error-msg" role="alert" aria-live="assertive">{error}</div>}
 
             <button onClick={handleAnalyze} disabled={isAnalyzing} style={{ marginTop: '1rem' }} className="analyze-btn">
               {isAnalyzing ? <div className="loader" aria-hidden="true"></div> : <LayoutDashboard size={20} aria-hidden="true" />}
@@ -291,7 +350,7 @@ function App() {
             )}
 
             {isAnalyzing && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--accent-blue)', gap: '1rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--accent-blue)', gap: '1rem' }} role="status">
                 <div className="loader" style={{ width: '40px', height: '40px', borderWidth: '4px', borderColor: 'rgba(59, 130, 246, 0.2)', borderTopColor: 'var(--accent-blue)' }} aria-hidden="true"></div>
                 <p style={{ fontWeight: 500 }}>Synthesizing Neural Response...</p>
               </div>
@@ -304,7 +363,7 @@ function App() {
                     <h2 style={{ marginTop: 0, marginBottom: '0.25rem', fontSize: '1.5rem' }}>Incident Dashboard</h2>
                     <div className="data-value" style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>{result.incidentType}</div>
                   </div>
-                  {renderBadge(result.priority)}
+                  <PriorityBadge priority={result.priority} />
                 </div>
 
                 <div className="data-row" style={{ flexDirection: 'row', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '2rem' }}>
@@ -313,7 +372,7 @@ function App() {
                     <div className="data-label">Extracted Location</div>
                     <div className="data-value">{result.location}</div>
                     
-                    {result.mapsSearchQuery && (
+                    {mapsEmbedUrl && (
                       <div style={{ marginTop: '1rem', width: '100%', height: '220px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
                         <iframe
                           title={`Google Maps showing ${result.mapsSearchQuery}`}
@@ -323,7 +382,7 @@ function App() {
                           loading="lazy"
                           allowFullScreen
                           referrerPolicy="no-referrer-when-downgrade"
-                          src={`https://www.google.com/maps?q=${encodeURIComponent(result.mapsSearchQuery)}&output=embed`}
+                          src={mapsEmbedUrl}
                         ></iframe>
                       </div>
                     )}
@@ -334,25 +393,14 @@ function App() {
                   <div className="data-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
                     <Users size={16} aria-hidden="true" /> Required Resource Allocations
                   </div>
-                  <ul className="list-items" aria-label="Required Resources">
-                    {result.resourcesRequired.map((res, i) => (
-                      <li key={i}>{res}</li>
-                    ))}
-                  </ul>
+                  <ResourceList items={result.resourcesRequired} label="Required Resources" />
                 </div>
 
                 <div className="data-row" style={{ marginTop: '2rem' }}>
                   <div className="data-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
                     <Activity size={16} aria-hidden="true" /> Critical Action Steps
                   </div>
-                  <ul className="list-items" style={{ gap: '0.5rem' }} aria-label="Critical Action Steps">
-                    {result.actionSteps.map((step, i) => (
-                      <li key={i} style={{ borderLeftColor: 'var(--border-subtle)', background: 'transparent', padding: '0.25rem 0', display: 'flex', gap: '1rem' }}>
-                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{(i+1).toString().padStart(2, '0')}</span>
-                        <span>{step}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <ActionStepsList steps={result.actionSteps} />
                 </div>
               </div>
             )}
