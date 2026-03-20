@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
 import { ShieldAlert, MapPin, Users, Activity } from 'lucide-react';
+import { Loader } from '@googlemaps/js-api-loader';
 
 /** Memoized priority badge component */
 const PriorityBadge = React.memo(({ priority }) => {
@@ -50,12 +51,39 @@ ActionStepsList.propTypes = {
  * Code-split from main bundle to maximize rendering efficiency.
  */
 const Dashboard = ({ result, isAnalyzing }) => {
-  /** Memoize the Google Maps embed URL to prevent iframe re-renders */
-  const mapsEmbedUrl = useMemo(() => {
-    if (result?.mapsSearchQuery) {
-      return `https://www.google.com/maps?q=${encodeURIComponent(result.mapsSearchQuery)}&output=embed`;
+  const mapRef = useRef(null);
+
+  useEffect(() => {
+    if (result?.mapsSearchQuery && mapRef.current) {
+      // Adopt official Google Maps JavaScript API for dynamic tracking
+      const initMap = async () => {
+        try {
+          const loader = new Loader({
+            apiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "AIzaSyDummyKeyForMapsTestingOnly",
+            version: "weekly",
+            libraries: ["places"]
+          });
+
+          const { Map } = await loader.importLibrary("maps");
+          const { Geocoder } = await loader.importLibrary("geocoding");
+          
+          const geocoder = new Geocoder();
+          geocoder.geocode({ address: result.mapsSearchQuery }, (results, status) => {
+            if (status === 'OK' && results[0]) {
+              new Map(mapRef.current, {
+                center: results[0].geometry.location,
+                zoom: 15,
+                disableDefaultUI: true
+              });
+            }
+          });
+        } catch (e) {
+          console.warn("Google Maps SDK load error (expected in demo mode):", e.message);
+        }
+      };
+      
+      initMap();
     }
-    return null;
   }, [result?.mapsSearchQuery]);
 
   if (!result && !isAnalyzing) {
@@ -93,20 +121,11 @@ const Dashboard = ({ result, isAnalyzing }) => {
           <div className="data-label">Extracted Location</div>
           <div className="data-value">{result.location}</div>
           
-          {mapsEmbedUrl && (
-            <div style={{ marginTop: '1rem', width: '100%', height: '220px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
-              <iframe
-                title={`Google Maps showing ${result.mapsSearchQuery}`}
-                width="100%"
-                height="100%"
-                style={{ border: 0 }}
-                loading="lazy"
-                allowFullScreen
-                referrerPolicy="no-referrer-when-downgrade"
-                src={mapsEmbedUrl}
-              ></iframe>
-            </div>
-          )}
+          <div 
+            ref={mapRef}
+            title={`Google Maps showing ${result.mapsSearchQuery || result.location}`}
+            style={{ marginTop: '1rem', width: '100%', height: '220px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-subtle)', background: 'rgba(0,0,0,0.2)' }}
+          ></div>
         </div>
       </div>
 

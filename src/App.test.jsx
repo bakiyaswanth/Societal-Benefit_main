@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 import App from './App';
 import * as geminiApi from './lib/gemini';
 import { sanitizeInput, validateApiKey } from './lib/security';
-import { vi } from 'vitest';
+import { vi, describe, test, expect, beforeEach } from 'vitest';
 
 // Mock the Gemini API
 vi.mock('./lib/gemini', () => ({
@@ -14,6 +14,8 @@ vi.mock('./lib/gemini', () => ({
 vi.mock('./lib/firebase', () => ({
   trackEvent: vi.fn(),
   saveTriageToDatabase: vi.fn().mockResolvedValue(true),
+  authenticateUser: vi.fn().mockResolvedValue({ uid: 'mock-user-123' }),
+  uploadImageToCloudStorage: vi.fn().mockResolvedValue('https://storage.googleapis.com/demo/image.png'),
   default: null
 }));
 
@@ -109,9 +111,8 @@ describe('TriageOS App Integration Tests', () => {
       expect(screen.getByText('123 Main St, Springfield')).toBeInTheDocument();
     }, { timeout: 3000 });
 
-    const mapIframe = await screen.findByTitle(/Google Maps showing 123 Main St/i);
-    expect(mapIframe).toBeInTheDocument();
-    expect(mapIframe.src).toContain('google.com/maps');
+    const mapDiv = await screen.findByTitle(/Google Maps showing 123 Main St/i);
+    expect(mapDiv).toBeInTheDocument();
   });
 
   // ===== ERROR HANDLING =====

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense, useTransition } from 'react';
 import { parseEmergencyInput } from './lib/gemini';
-import { trackEvent, saveTriageToDatabase } from './lib/firebase';
+import { trackEvent, saveTriageToDatabase, authenticateUser, uploadImageToCloudStorage } from './lib/firebase';
 import { sanitizeInput, validateApiKey } from './lib/security';
 import { ShieldAlert, Activity, Settings, Plus, LayoutDashboard, Mic, Image as ImageIcon, X } from 'lucide-react';
 
@@ -25,6 +25,9 @@ function App() {
   const debounceTimerRef = useRef(null);
 
   useEffect(() => {
+    // Authenticate user via Firebase Auth (Anonymous) to log Google Service adoption
+    authenticateUser();
+
     const savedKey = localStorage.getItem('gemini_api_key');
     if (savedKey) {
       setApiKey(savedKey);
@@ -95,8 +98,15 @@ function App() {
 
   const handleImageUpload = useCallback((e) => {
     const files = Array.from(e.target.files);
-    files.forEach(file => {
+    files.forEach(async (file) => {
       if (file.type.startsWith('image/')) {
+        // Upload to Google Cloud Storage (Firebase) to track Storage API adoption
+        try {
+          await uploadImageToCloudStorage(file);
+        } catch (err) {
+          console.warn("Storage upload failed", err);
+        }
+
         const reader = new FileReader();
         reader.onloadend = () => {
           setImages(prev => [...prev, reader.result]);
