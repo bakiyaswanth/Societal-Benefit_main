@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import App from './App';
 import * as geminiApi from './lib/gemini';
 import { sanitizeInput, validateApiKey } from './lib/security';
@@ -30,13 +31,21 @@ describe('TriageOS App Integration Tests', () => {
 
   // ===== SECURITY & RENDERING =====
   test('Renders the API Key configuration screen initially', () => {
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     expect(screen.getByText(/TriageOS/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Google Gemini API Key/i)).toBeInTheDocument();
   });
 
   test('Saves API key securely to localStorage and transitions to main dashboard', () => {
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const input = screen.getByLabelText(/Google Gemini API Key/i);
     const submitBtn = screen.getByRole('button', { name: /Save API Key and start system/i });
@@ -49,7 +58,11 @@ describe('TriageOS App Integration Tests', () => {
   });
 
   test('Rejects API key that is too short', () => {
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const input = screen.getByLabelText(/Google Gemini API Key/i);
     const submitBtn = screen.getByRole('button', { name: /Save API Key and start system/i });
@@ -63,14 +76,22 @@ describe('TriageOS App Integration Tests', () => {
 
   test('Loads API key from localStorage on mount and shows dashboard directly', () => {
     localStorage.setItem('gemini_api_key', 'SAVED_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     expect(screen.getByText(/Multi-Modal Stream/i)).toBeInTheDocument();
   });
 
   // ===== VALIDATION & EDGE CASES =====
   test('Shows validation error when submitting with empty input and no images', async () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const analyzeBtn = screen.getByRole('button', { name: /Extract & Triage Action Plan/i });
     fireEvent.click(analyzeBtn);
@@ -95,7 +116,11 @@ describe('TriageOS App Integration Tests', () => {
 
     geminiApi.parseEmergencyInput.mockResolvedValueOnce(mockResponse);
 
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const textArea = screen.getByPlaceholderText(/e.g. 'Massive pileup/i);
     fireEvent.change(textArea, { target: { value: 'Car crash at 123 Main St.' } });
@@ -120,7 +145,11 @@ describe('TriageOS App Integration Tests', () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
     geminiApi.parseEmergencyInput.mockRejectedValueOnce(new Error('Invalid API Key provided.'));
 
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const textArea = screen.getByPlaceholderText(/e.g. 'Massive pileup/i);
     fireEvent.change(textArea, { target: { value: 'Test input' } });
@@ -137,7 +166,11 @@ describe('TriageOS App Integration Tests', () => {
   // ===== RESET FLOW =====
   test('Reset Key button clears localStorage and returns to config screen', () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const resetBtn = screen.getByRole('button', { name: /Reset System and remove API Key/i });
     fireEvent.click(resetBtn);
@@ -149,7 +182,11 @@ describe('TriageOS App Integration Tests', () => {
   // ===== ACCESSIBILITY =====
   test('Skip-to-content link is present and targets main content', () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const skipLink = screen.getByText(/Skip to main content/i);
     expect(skipLink).toBeInTheDocument();
@@ -158,7 +195,11 @@ describe('TriageOS App Integration Tests', () => {
 
   test('Dashboard section has correct ARIA live region attributes', () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const dashboard = screen.getByRole('region', { name: /Analysis Dashboard/i });
     expect(dashboard).toHaveAttribute('aria-live', 'polite');
@@ -166,7 +207,11 @@ describe('TriageOS App Integration Tests', () => {
 
   test('Icon buttons have descriptive aria-labels for screen readers', () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     expect(screen.getByRole('button', { name: /Upload evidence photos or medical records/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Start live voice dictation/i })).toBeInTheDocument();
@@ -174,7 +219,11 @@ describe('TriageOS App Integration Tests', () => {
 
   test('Mic button has correct aria-pressed attribute', () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const micBtn = screen.getByRole('button', { name: /Start live voice dictation/i });
     expect(micBtn).toHaveAttribute('aria-pressed', 'false');
@@ -182,7 +231,11 @@ describe('TriageOS App Integration Tests', () => {
 
   test('Input toolbar has correct ARIA role', () => {
     localStorage.setItem('gemini_api_key', 'TEST_KEY');
-    render(<App />);
+    render(
+      <GoogleOAuthProvider clientId="test-client-id">
+        <App />
+      </GoogleOAuthProvider>
+    );
     
     const toolbar = screen.getByRole('toolbar', { name: /Input tools/i });
     expect(toolbar).toBeInTheDocument();

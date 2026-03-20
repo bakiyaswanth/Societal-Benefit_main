@@ -21,7 +21,7 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-DEMO"
 };
 
-let app, analytics, db, auth, storage, perf, remoteConfig;
+let app, analytics, db, auth, storage;
 
 try {
   app = initializeApp(firebaseConfig);
@@ -31,8 +31,8 @@ try {
     analytics = getAnalytics(app);
     db = getFirestore(app);
     // Extra Google Services integration points
-    perf = getPerformance(app);
-    remoteConfig = getRemoteConfig(app);
+    getPerformance(app);
+    const remoteConfig = getRemoteConfig(app);
     remoteConfig.settings.minimumFetchIntervalMillis = 3600000;
   }
 } catch (e) {
